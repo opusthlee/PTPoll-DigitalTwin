@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PTPoll Project Hub</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap');
+        body { font-family: 'Outfit', sans-serif; background-color: #0b0f1a; color: #e2e8f0; height: 100vh; overflow: hidden; }
+        .glass-card { background: rgba(22, 28, 45, 0.7); backdrop-filter: blur(25px); border: 1px solid rgba(255,255,255,0.05); border-radius: 1.5rem; }
+        .sidebar-title { background: linear-gradient(135deg, #3b82f6 0%, #2dd4bf 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    </style>
+</head>
+<body class="p-6">
+    <div class="grid grid-cols-12 gap-6 h-full">
+        <!-- Sidebar -->
+        <aside class="col-span-3 flex flex-col gap-6 h-full overflow-hidden">
+            <div class="glass-card p-6 border-l-4 border-blue-500">
+                <h1 id="projectTitle" class="text-xl font-bold sidebar-title mb-1 leading-tight">Project Hub</h1>
+                <p class="text-[9px] text-slate-500 uppercase tracking-[0.3em] font-bold mb-6">Intelligence Engine</p>
+                <div class="space-y-4">
+                    <div>
+                        <label class="text-[10px] text-slate-500 block mb-1 uppercase font-bold tracking-widest">Region</label>
+                        <select id="regSelect" onchange="runSimulation('region')" class="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-sm outline-none focus:border-blue-500">
+                            <option value="전국" selected>전국 (Baseline)</option><option value="서울">서울 (Metro)</option><option value="종로구">종로구 (Local)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-[10px] text-slate-500 block mb-1 uppercase font-bold tracking-widest">Age Group</label>
+                        <select id="ageSelect" onchange="runSimulation('age')" class="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-sm outline-none focus:border-blue-500">
+                            <option value="전체 연령" selected>전체 연령</option><option value="20대">20대</option><option value="30대">30대</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-[10px] text-slate-500 block mb-1 uppercase font-bold tracking-widest">Gender</label>
+                        <select id="genSelect" onchange="runSimulation('gender')" class="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-sm outline-none focus:border-blue-500">
+                            <option value="전체 성별" selected>전체 성별</option><option value="남성">남성</option><option value="여성">여성</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-[10px] text-slate-500 block mb-2 uppercase font-bold tracking-widest text-blue-400">Impact (<span id="impactVal">0</span>%)</label>
+                        <input type="range" id="impactSlider" min="-50" max="50" value="0" oninput="document.getElementById('impactVal').innerText=this.value" class="w-full accent-blue-400">
+                    </div>
+                    <button onclick="runSimulation('btn')" class="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-bold text-xs shadow-xl active:scale-95 transition-all">Execute Analysis</button>
+                </div>
+            </div>
+            <div class="glass-card p-6 flex-grow flex flex-col overflow-hidden border-t border-white/5">
+                <h2 class="text-[10px] font-bold text-slate-500 uppercase mb-3 tracking-widest">Analytical Engine Logs</h2>
+                <div id="logContent" class="flex-grow overflow-auto text-[10px] text-slate-500 font-mono space-y-0.5 bg-black/20 p-3 rounded-xl"></div>
+            </div>
+        </aside>
+
+        <!-- Main Area -->
+        <main class="col-span-9 flex flex-col gap-6 h-full overflow-hidden">
+            <div class="grid grid-cols-2 gap-6 h-2/3">
+                <div class="glass-card p-6 flex flex-col">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Simulated Projection</h3>
+                    <div class="flex-grow relative"><canvas id="supportChart"></canvas></div>
+                </div>
+                <div class="glass-card p-6 flex flex-col">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4"><span id="trendTargetName" class="text-blue-400">전국</span> Trend Trajectory</h3>
+                    <div class="flex-grow relative"><canvas id="trendChart"></canvas></div>
+                </div>
+            </div>
+            <div class="glass-card p-6 flex-grow flex flex-col overflow-hidden">
+                <h2 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Structural Momentum Analysis</h2>
+                <div id="momentumList" class="grid grid-cols-3 gap-4 overflow-auto"></div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        let barChart, trendChart, lastActiveType = 'region';
+
+        function log(msg, isError = false) {
+            const el = document.getElementById('logContent');
+            const div = document.createElement('div');
+            div.className = isError ? 'text-red-400 font-bold' : '';
+            div.innerHTML = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            el.appendChild(div);
+            el.scrollTop = el.scrollHeight;
+        }
+
+        async function init() {
+            const projResp = await fetch('/api/project');
+            const project = await projResp.json();
+            document.getElementById('projectTitle').innerText = project.title;
+            initCharts();
+            await runSimulation('region');
+        }
+
+        function initCharts() {
+            const opt = { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#64748b', font: { size: 10 } } } } };
+            barChart = new Chart(document.getElementById('supportChart'), { type: 'bar', data: { labels: [], datasets: [] }, options: opt });
+            trendChart = new Chart(document.getElementById('trendChart'), { type: 'line', data: { labels: [], datasets: [] }, options: opt });
+        }
+
+        async function runSimulation(triggerType) {
+            if (triggerType !== 'btn') lastActiveType = triggerType;
+
+            const reg = document.getElementById('regSelect').value;
+            const age = document.getElementById('ageSelect').value;
+            const gen = document.getElementById('genSelect').value;
+            
+            // 지능형 세그먼트 결정: 마지막으로 변경된 카테고리를 우선 분석
+            let segment = "전국";
+            if (lastActiveType === 'region') segment = reg;
+            else if (lastActiveType === 'age') segment = age;
+            else if (lastActiveType === 'gender') segment = gen;
+
+            document.getElementById('trendTargetName').innerText = segment;
+            const impact = document.getElementById('impactSlider').value / 100;
+            const safeSegment = encodeURIComponent(segment);
+
+            try {
+                log(`Analyzing <b>${segment}</b>...`);
+                
+                const tResp = await fetch(`/api/trends?segment=${safeSegment}`);
+                const tData = await tResp.json();
+                if (tData.error) throw new Error(tData.error);
+
+                const sResp = await fetch(`/api/simulate?segment=${safeSegment}&impact=${impact}`);
+                const sData = await sResp.json();
+                if (sData.error) throw new Error(sData.error);
+
+                // UI 갱신 (데이터 존재 여부 확인)
+                if (!sData.original || !sData.simulated) throw new Error("Incomplete data received");
+
+                barChart.data.labels = Object.keys(sData.original);
+                barChart.data.datasets = [
+                    { label: 'Current', data: Object.values(sData.original), backgroundColor: 'rgba(71, 85, 105, 0.3)', borderRadius: 8 },
+                    { label: 'Projected', data: Object.values(sData.simulated), backgroundColor: '#3b82f6', borderRadius: 8 }
+                ];
+                barChart.update();
+
+                trendChart.data.labels = [...tData.dates, "Future"];
+                trendChart.data.datasets = Object.keys(tData.candidates).map((name, idx) => ({
+                    label: name,
+                    data: [...tData.candidates[name], sData.simulated[name]],
+                    borderColor: ['#3b82f6', '#ef4444', '#10b981'][idx % 3],
+                    tension: 0.4,
+                    segment: { borderDash: (ctx) => ctx.p1DataIndex === tData.dates.length ? [5, 5] : [] }
+                }));
+                trendChart.update();
+
+                const mList = document.getElementById('momentumList');
+                mList.innerHTML = "";
+                Object.keys(sData.momentum).forEach(name => {
+                    const v = sData.momentum[name];
+                    mList.innerHTML += `<div class="bg-white/5 p-4 rounded-xl flex flex-col gap-1 border border-white/5"><span class="text-[9px] font-bold text-slate-500 uppercase">${name}</span><span class="text-lg font-bold ${v > 0 ? 'text-green-400' : 'text-red-400'}">${v > 0 ? '+' : ''}${v}%</span></div>`;
+                });
+                log(`Success: ${segment} analysis updated.`);
+            } catch (e) { log(`Error: ${e.message}`, true); }
+        }
+        window.onload = init;
+    </script>
+</body>
+</html>

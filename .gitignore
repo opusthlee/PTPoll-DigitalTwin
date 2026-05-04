@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+.env
+.DS_Store
+
+# Data files (DB는 구조만 유지하거나 용량에 따라 제외)
+# data/*/hub.db
