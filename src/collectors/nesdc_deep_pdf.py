@@ -1,73 +1,64 @@
-import os
-import json
-import sqlite3
-import base64
-from typing import List, Dict
+"""
+NESDC PDF deep extraction — 후보×demographic 지지율 추출 (D-2).
 
-class NESDCPDFProcessor:
-    def __init__(self, db_path: str, api_key: str = None):
-        self.db_path = db_path
-        self.api_key = api_key
+NESDC 공개 정책: 후보 지지율 by demographic은 PDF에만 존재.
+HTML(`nesdc_html.py`)은 sample 분포(N수)만 보유 — D-1에서 처리.
 
-    def process_and_save(self, poll_obj_id: int):
-        """AI Vision을 통한 추출 시뮬레이션 및 DB 저장 실행"""
-        print(f"[*] Starting Deep Analysis for Poll ID: {poll_obj_id}")
-        
-        # 1. AI 가상 추출 (실제 구현 시 Vision API 호출)
-        extracted_data = self._mock_ai_table_extraction()
-        
-        # 2. 온톨로지 DB 저장
-        self._save_to_ontology(poll_obj_id, extracted_data)
+이 모듈은 Vision API를 사용한 PDF 표 추출용. 현재는 인터페이스 정의만 있고,
+실제 호출은 ANTHROPIC_API_KEY + `pip install anthropic` 필요.
 
-    def _save_to_ontology(self, poll_obj_id: int, data: List[Dict]):
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+향후 구현 시:
+1. PDF 다운로드 (NESDC 첨부파일 URL — list/detail 페이지에 FileDown 링크 존재)
+2. PDF → 이미지 변환 (Claude Vision은 PDF 직접 입력도 지원)
+3. Vision API로 표 추출 (구조화 prompt)
+4. 결과 → MEASURES_IN_SEGMENT links
 
-        try:
-            for item in data:
-                group = item["group"]
-                segment = item["segment"]
-                results = item["results"]
+비용 추정: PDF당 ~$0.01-0.05.
+"""
+from typing import Dict, List, Protocol
 
-                seg_name = f"{group}_{segment}"
-                
-                # SEGMENT 객체 생성 또는 ID 획득
-                cursor.execute("SELECT id FROM objects WHERE obj_type='SEGMENT' AND name=?", (seg_name,))
-                res = cursor.fetchone()
-                
-                if res:
-                    segment_id = res[0]
-                else:
-                    cursor.execute(
-                        "INSERT INTO objects (obj_type, name, properties) VALUES (?, ?, ?)",
-                        ("SEGMENT", seg_name, json.dumps({"category": group, "label": segment}))
-                    )
-                    segment_id = cursor.lastrowid
 
-                # 관계 생성: POLL --[MEASURES_IN_SEGMENT]--> SEGMENT
-                cursor.execute(
-                    "INSERT INTO links (source_id, target_id, link_type, properties) VALUES (?, ?, ?, ?)",
-                    (poll_obj_id, segment_id, "MEASURES_IN_SEGMENT", json.dumps(results))
-                )
-            
-            conn.commit()
-            print(f"[+] Successfully saved {len(data)} cross-tab segments.")
-        except Exception as e:
-            print(f"[-] Error: {e}")
-            conn.rollback()
-        finally:
-            conn.close()
+class SegmentSupportExtractor(Protocol):
+    """후보×demographic 지지율 추출기 인터페이스.
 
-    def _mock_ai_table_extraction(self) -> List[Dict]:
-        return [
-            {"group": "AGE", "segment": "20s", "results": {"홍길동": 28.5, "이순신": 41.2}},
-            {"group": "AGE", "segment": "30s", "results": {"홍길동": 35.0, "이순신": 38.5}},
-            {"group": "REGION", "segment": "Seoul", "results": {"홍길동": 45.2, "이순신": 32.1}},
-            {"group": "GENDER", "segment": "Female", "results": {"홍길동": 30.5, "이순신": 44.8}}
-        ]
+    구현체는 PDF/이미지를 입력받아 표준 segment-support 형식 반환.
+    형식:
+      [
+        {"group": "AGE", "segment": "30대",
+         "results": {"홍길동": 35.0, "이순신": 38.5}},
+        {"group": "GENDER", "segment": "남",
+         "results": {"홍길동": 40.0, "이순신": 42.0}},
+        ...
+      ]
+    """
 
-if __name__ == "__main__":
-    DB_PATH = "/Users/up_main/Desktop/T_Antigravity/PTPoll/src/db/ptpoll_twin.db"
-    processor = NESDCPDFProcessor(DB_PATH)
-    # 테스트 데이터 주입
-    processor.process_and_save(poll_obj_id=2)
+    def extract(self, pdf_url: str) -> List[Dict]: ...
+
+
+class AnthropicVisionExtractor:
+    """Claude Vision API 기반 추출기 — 미구현 stub.
+
+    활성화하려면:
+        pip install anthropic
+        export ANTHROPIC_API_KEY=sk-ant-...
+
+    그 후 이 클래스의 extract() 구현 (Anthropic SDK + Vision messages).
+    """
+
+    def __init__(self, api_key: str = None, model: str = "claude-opus-4-7"):
+        import os
+        self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+        self.model = model
+
+    def extract(self, pdf_url: str) -> List[Dict]:
+        if not self.api_key:
+            raise RuntimeError(
+                "ANTHROPIC_API_KEY 미설정. D-2 활성화 절차:\n"
+                "  1) pip install anthropic\n"
+                "  2) export ANTHROPIC_API_KEY=sk-ant-...\n"
+                "  3) AnthropicVisionExtractor.extract() 구현 (Vision API call)"
+            )
+        raise NotImplementedError(
+            "Vision API 호출 미구현. PDF→이미지→Anthropic Messages API 호출 후 "
+            "structured output parsing 필요."
+        )

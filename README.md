@@ -59,7 +59,42 @@ POLLAGG_API=https://api-poll.dailyprizm.com/api \
 
 UPSERT 기반이라 **재실행 안전**. sync_state 테이블에 마지막 실행 시점·건수 기록됨.
 
-### 3. 대시보드 실행
+### 3. NESDC HTML demographic 추출 (D-1)
+
+```bash
+# 최근 ntt_id 10개의 sample demographic 분포 → SEGMENT(AGE/GENDER/REGION_FRAME)
+python src/sync/extract_segments.py --limit 10
+
+# 특정 ntt_id만
+python src/sync/extract_segments.py --ntt-id 18544 --ntt-id 18543
+
+# 이미 처리된 항목도 갱신
+python src/sync/extract_segments.py --limit 5 --no-skip-existing
+```
+
+NESDC HTML은 sample 분포(N수)만 보유. 후보×demographic 지지율은 PDF에만 있음.
+PDF 추출(D-2)은 ANTHROPIC_API_KEY + Vision API 필요 — 별건 작업.
+
+### 4. 일일 cron 등록 (E)
+
+```bash
+# 매일 05:00 KST 자동 실행 (PollAgg 04:00 sync 1시간 후)
+./scripts/install_cron.sh install
+
+# 상태 확인
+./scripts/install_cron.sh status
+
+# 제거
+./scripts/install_cron.sh uninstall
+
+# 수동 실행
+./scripts/cron_pipeline.sh
+```
+
+로그: `logs/pipeline.log`, 실패 시 `logs/alerts.log`.
+알림 활성화: `.cron.env` 파일에 `SLACK_WEBHOOK=...` 또는 `NTFY_TOPIC=...` 설정.
+
+### 5. 대시보드 실행
 
 ```bash
 python src/api/dashboard_server.py
@@ -105,9 +140,27 @@ sqlite3 data/2026_local_election/hub.db \
 | ✅ A. Reset & schema | 완료 (UNIQUE 제약 + sync_state) |
 | ✅ B. REST sync | 완료 (idempotent UPSERT) |
 | ✅ C. Region segment 자동 생성 | 완료 (대시보드 차트·시뮬 작동) |
-| ⏳ D. NESDC PDF deep extraction | `src/collectors/nesdc_deep_pdf.py` mock → 실 Vision API |
-| ⏳ E. 일일 cron sync | crontab 등록, 실패 알림 |
-| ⏳ F. 통합 운영 (모델 2) | PollAgg와 도메인·인프라 분리, sync만 공유 |
+| ✅ D-1. NESDC HTML sample demographic | 완료 (`extract_segments.py` — AGE/GENDER/REGION_FRAME N수) |
+| ⏳ D-2. NESDC PDF 후보×demographic 지지율 | ANTHROPIC_API_KEY + `pip install anthropic` 필요. Vision API 호출 ~$0.02/PDF |
+| ✅ E. 일일 cron 파이프라인 | 완료 (`scripts/cron_pipeline.sh`, `install_cron.sh`) |
+| ⏳ F. 통합 운영 (모델 2) | PollAgg와 도메인·인프라 분리, sync만 공유 (`pt.dailyprizm.com`) |
+
+## D-2 (PDF deep extraction) 셋업 가이드
+
+PDF에서 후보×demographic 지지율을 뽑으려면 Vision API 필요:
+
+```bash
+# 1. 의존성 설치
+pip install anthropic
+
+# 2. API key 환경변수 설정 (~/.zshrc 또는 .cron.env)
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# 3. (구현 예정) PDF 추출 스크립트
+# python src/sync/extract_pdf_segments.py --limit 5
+```
+
+비용: PDF당 ~$0.01-0.05. 100개 PDF = $1~5 (1회성, 누적 안 됨).
 
 ## 백업
 

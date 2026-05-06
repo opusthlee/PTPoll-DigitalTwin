@@ -11,3 +11,9 @@ ENV/
 data/*/hub.db
 data/*/backups/
 src/db/ptpoll_twin.db
+
+# Cron logs
+logs/
+
+# 비밀: cron 알림 webhook
+.cron.env
