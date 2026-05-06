@@ -33,15 +33,22 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.send_response(200); self.send_header('Content-type', 'application/json'); self.end_headers()
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
-            cursor.execute("SELECT name, properties FROM objects WHERE obj_type='SEGMENT'")
+            # MEASURES_IN_SEGMENT link이 있는 segment만 노출 (대시보드 클릭 시 실제 trend 표시되는 것만).
+            # AGE/GENDER는 SAMPLED link만 있고 candidate 지지율 데이터 없음 (PDF deep-extraction 후 채워짐).
+            cursor.execute("""
+                SELECT s.name, s.properties FROM objects s
+                WHERE s.obj_type='SEGMENT'
+                  AND EXISTS (SELECT 1 FROM links l
+                              WHERE l.target_id = s.id AND l.link_type='MEASURES_IN_SEGMENT')
+            """)
             meta = {"REGION": [], "AGE": [], "GENDER": [], "dates": []}
             for name, props in cursor.fetchall():
                 p = json.loads(props); cat = p.get('category', 'ETC')
                 if cat in meta: meta[cat].append(normalize_ko(name))
-            cursor.execute("SELECT properties FROM objects WHERE obj_type='POLL'")
-            for row in cursor.fetchall():
-                p = json.loads(row[0]); meta['dates'].append(p.get('date'))
-            meta['dates'].sort(); conn.close()
+            # dates: unique + None 제거 + 정렬 (sort()가 None 만나면 TypeError)
+            cursor.execute("SELECT DISTINCT properties->>'date' FROM objects WHERE obj_type='POLL'")
+            meta['dates'] = sorted({d for (d,) in cursor.fetchall() if d})
+            conn.close()
             self.wfile.write(json.dumps(meta).encode())
 
         elif parsed_path.path == '/api/trends':

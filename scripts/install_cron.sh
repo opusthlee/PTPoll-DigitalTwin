@@ -8,7 +8,8 @@ set -euo pipefail
 
 PROJECT_DIR="${PTPOLL_DIR:-/Users/up_main/Desktop/T_Antigravity/PTPoll}"
 SCRIPT="$PROJECT_DIR/scripts/cron_pipeline.sh"
-ENTRY="0 5 * * * $SCRIPT"
+# stdout/stderr를 cron-stdout.log에 redirect — 스크립트 자체 에러 진단용
+ENTRY="0 5 * * * $SCRIPT >> $PROJECT_DIR/logs/cron-stdout.log 2>&1"
 MARKER="# PTPoll daily pipeline"
 
 cmd="${1:-status}"

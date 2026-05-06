@@ -170,6 +170,19 @@ cp data/2026_local_election/hub.db \
    data/2026_local_election/backups/hub_$(date +%Y%m%d_%H%M%S).db
 ```
 
+## 테스트
+
+55개 단위·통합 테스트로 schema, sync, extract, dashboard 쿼리 검증:
+
+```bash
+./scripts/run_tests.sh                                   # 전체
+python3 -m unittest tests.test_init_twin_db              # 모듈별
+python3 -m unittest tests.test_dashboard_integration -v  # 상세 출력
+```
+
+테스트는 임시 sqlite로 격리되며, 통합 테스트는 실제 hub.db도 검사 (없으면 skip).
+네트워크 호출은 mock 처리되어 외부 의존성 없음.
+
 ## 트러블슈팅
 
 | 증상 | 원인 | 조치 |
@@ -178,6 +191,20 @@ cp data/2026_local_election/hub.db \
 | "DB not found" | hub.db 미생성 | `python src/db/init_twin_db.py --reset` 선행 |
 | /api/trends 응답 빈 | segment 미생성 또는 이름 mismatch | `sqlite3 hub.db "SELECT * FROM objects WHERE obj_type='SEGMENT'"` 로 확인 |
 | 대시보드 차트 안 그려짐 | hub.db 갱신 후 브라우저 cache | 강력 새로고침 (Cmd+Shift+R) |
+| AGE/GENDER 드롭다운에 안 나옴 | MEASURES_IN_SEGMENT link 없음 (정상) | D-2 PDF 추출 구현 후 자동 노출됨 |
+| cron 등록했는데 안 실행됨 | macOS Full Disk Access 권한 필요할 수 있음 | 시스템 설정 → 개인정보 보호 → 전체 디스크 접근에 `cron` 추가 |
+| pipeline.log 비대해짐 | log rotation 미구현 | 수동 truncate 또는 logrotate 설정 (향후 작업) |
+
+## 알려진 제약
+
+| 항목 | 현재 동작 | 개선 시점 |
+|------|---------|----------|
+| schema 마이그레이션 | `IF NOT EXISTS` 기반 — 새 컬럼은 자동 추가 안 됨 | 향후 alembic 도입 검토 |
+| raw_mirror 누적 | UPSERT라 무한 증가 안 함 (poll 수 = mirror 수). PollAgg 9028 → 4MB | 1년 후 archive 정책 |
+| AGE/GENDER candidate 지지율 | NESDC PDF 정책상 HTML 미공개 → SAMPLED N수만 | D-2 (Vision API) 활성화 후 |
+| PollAgg ↔ NESDC POLL cross-reference | 별도 객체로 저장 (`nesdc:{id}` vs `{id}`). agency+date 매칭 미구현 | 향후 graph build 단계 |
+| sqlite WAL mode | OFF (기본) | 동시성 이슈 발생 시 활성화 |
+| log rotation | 없음 | logrotate 또는 size 기반 archive |
 
 ## 라이선스 / 책임
 
