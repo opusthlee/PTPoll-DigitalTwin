@@ -7,5 +7,7 @@ ENV/
 .env
 .DS_Store
 
-# Data files (DB는 구조만 유지하거나 용량에 따라 제외)
-# data/*/hub.db
+# Data files — sync로 재생성 가능, 용량 큼 (hub.db 26MB+)
+data/*/hub.db
+data/*/backups/
+src/db/ptpoll_twin.db
