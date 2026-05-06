@@ -87,6 +87,16 @@ run_step "transform_mirror (PollAgg → hub.db)" \
 run_step "extract_segments (NESDC HTML → demographics)" \
   $PYTHON src/sync/extract_segments.py --limit 20 || OVERALL_OK=false
 
+# D-2 PDF Vision: ANTHROPIC_API_KEY 있고 inbox에 PDF 있을 때만 실행.
+# 비용 가드: 1회 실행당 최대 $0.50. limit으로 PDF 수도 제한.
+if [[ -n "${ANTHROPIC_API_KEY:-}" ]] && [[ -d "$PROJECT_DIR/data/pdf_inbox" ]] \
+   && ls "$PROJECT_DIR/data/pdf_inbox"/*.pdf >/dev/null 2>&1; then
+  run_step "extract_pdf_segments (PDF Vision → MEASURES_IN_SEGMENT)" \
+    $PYTHON src/sync/extract_pdf_segments.py --limit 10 --cost-cap 0.50 || OVERALL_OK=false
+else
+  echo "  → extract_pdf_segments skip (no API key or empty inbox)" >> "$LOG"
+fi
+
 if $OVERALL_OK; then
   echo "════════════ $TS OK ════════════" >> "$LOG"
   exit 0

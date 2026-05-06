@@ -97,13 +97,16 @@ class TestRealHubDb(unittest.TestCase):
         if hasattr(cls, "conn"):
             cls.conn.close()
 
-    def test_no_polls_with_null_date(self):
+    def test_pollagg_polls_have_date(self):
+        """PollAgg 출처 POLL은 항상 date 있어야 — 대시보드 sort 안전 보장.
+        PDF/NESDC 출처는 메타 추출 실패 시 None 가능 → SQL 필터 책임."""
         self.c.execute(
             "SELECT COUNT(*) FROM objects WHERE obj_type='POLL' "
+            "AND external_id NOT LIKE 'nesdc:%' AND external_id NOT LIKE 'pdf:%' "
             "AND (properties->>'date' IS NULL OR properties->>'date' = '')"
         )
         self.assertEqual(self.c.fetchone()[0], 0,
-                         "POLL에 date 누락 — 대시보드 sort 깨짐 위험")
+                         "PollAgg POLL에 date 누락 — sync 결함")
 
     def test_no_orphan_links(self):
         self.c.execute("""
@@ -139,10 +142,13 @@ class TestRealHubDb(unittest.TestCase):
         self.assertIn("pollagg_rest", sources)
 
     def test_pollagg_polls_have_results(self):
-        """PollAgg sync된 POLL에는 항상 MEASURES link이 있어야."""
+        """PollAgg sync된 POLL에는 항상 MEASURES link이 있어야.
+        NESDC HTML POLL과 PDF POLL은 MEASURES 없을 수 있음 (segment 단위만)."""
         self.c.execute("""
             SELECT COUNT(*) FROM objects o
-            WHERE o.obj_type='POLL' AND o.external_id NOT LIKE 'nesdc:%'
+            WHERE o.obj_type='POLL'
+              AND o.external_id NOT LIKE 'nesdc:%'
+              AND o.external_id NOT LIKE 'pdf:%'
               AND NOT EXISTS (SELECT 1 FROM links l
                               WHERE l.source_id=o.id AND l.link_type='MEASURES')
         """)

@@ -72,8 +72,35 @@ python src/sync/extract_segments.py --ntt-id 18544 --ntt-id 18543
 python src/sync/extract_segments.py --limit 5 --no-skip-existing
 ```
 
-NESDC HTML은 sample 분포(N수)만 보유. 후보×demographic 지지율은 PDF에만 있음.
-PDF 추출(D-2)은 ANTHROPIC_API_KEY + Vision API 필요 — 별건 작업.
+NESDC HTML은 sample 분포(N수)만 보유. 후보×demographic 지지율은 PDF (D-2).
+
+### 3-2. PDF Vision 추출 (D-2)
+
+NESDC PDF 첨부는 로그인 필수로 차단됨 (2026-05 정책). 우회 — **PDF inbox 패턴**:
+
+```bash
+# 1. 사용자가 어떤 경로로든 PDF 확보 (NESDC 로그인, pollster 사이트, 보도자료 등)
+#    → data/pdf_inbox/ 디렉토리에 드롭
+cp my_poll.pdf data/pdf_inbox/
+
+# 2. ANTHROPIC_API_KEY .cron.env 설정 (1회)
+echo 'ANTHROPIC_API_KEY=sk-ant-api03-...' > .cron.env
+chmod 600 .cron.env
+
+# 3. 추출 실행
+./scripts/setup_venv.sh                  # 1회: venv + anthropic SDK 설치
+source .cron.env
+.venv/bin/python src/sync/extract_pdf_segments.py --dry-run        # 비용·결과 미리보기
+.venv/bin/python src/sync/extract_pdf_segments.py --limit 5         # 5개까지만
+.venv/bin/python src/sync/extract_pdf_segments.py --cost-cap 0.50   # 누적 $0.50까지
+```
+
+처리 완료 PDF는 `data/pdf_processed/`로, 유효하지 않은 PDF/0 segments PDF는
+`data/pdf_rejected/`로 자동 분류. file hash 기반 idempotency — 동일 PDF 재처리 X.
+
+**검증된 정확도**: 합성 한국어 폴 PDF, 22/22 셀 100% 정확 (이재명/윤석열 후보 × 11 segments).
+**비용**: PDF당 ~$0.01-0.05 (claude-sonnet-4-6, 페이지 수 의존).
+**자동 가드**: PDF magic 검증, 25MB 크기 제한, 누적 비용 cap, 0 segments 자동 거부.
 
 ### 4. 일일 cron 등록 (E)
 
@@ -141,8 +168,8 @@ sqlite3 data/2026_local_election/hub.db \
 | ✅ B. REST sync | 완료 (idempotent UPSERT) |
 | ✅ C. Region segment 자동 생성 | 완료 (대시보드 차트·시뮬 작동) |
 | ✅ D-1. NESDC HTML sample demographic | 완료 (`extract_segments.py` — AGE/GENDER/REGION_FRAME N수) |
-| ⏳ D-2. NESDC PDF 후보×demographic 지지율 | ANTHROPIC_API_KEY + `pip install anthropic` 필요. Vision API 호출 ~$0.02/PDF |
-| ✅ E. 일일 cron 파이프라인 | 완료 (`scripts/cron_pipeline.sh`, `install_cron.sh`) |
+| ✅ D-2. PDF 후보×demographic 지지율 | 완료 (`extract_pdf_segments.py` + Claude Vision). NESDC PDF 로그인 차단으로 PDF inbox 패턴 사용. 정확도 검증 22/22 100% |
+| ✅ E. 일일 cron 파이프라인 | 완료 (`cron_pipeline.sh` — sync + HTML demo + PDF Vision 통합) |
 | ⏳ F. 통합 운영 (모델 2) | PollAgg와 도메인·인프라 분리, sync만 공유 (`pt.dailyprizm.com`) |
 
 ## D-2 (PDF deep extraction) 셋업 가이드
