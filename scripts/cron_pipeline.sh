@@ -18,7 +18,15 @@ LOG="$LOG_DIR/pipeline.log"
 ALERT="$LOG_DIR/alerts.log"
 LOCK="/tmp/ptpoll-pipeline.lock"
 TS=$(date "+%Y-%m-%d %H:%M:%S %Z")
-PYTHON="${PTPOLL_PYTHON:-/usr/bin/env python3}"
+
+# Python 우선순위: 환경변수 > venv > system python3
+if [[ -n "${PTPOLL_PYTHON:-}" ]]; then
+  PYTHON="$PTPOLL_PYTHON"
+elif [[ -x "$PROJECT_DIR/.venv/bin/python" ]]; then
+  PYTHON="$PROJECT_DIR/.venv/bin/python"
+else
+  PYTHON="/usr/bin/env python3"
+fi
 
 # webhook env 옵션 (.cron.env가 있으면 source)
 if [[ -f "$PROJECT_DIR/.cron.env" ]]; then

@@ -5,6 +5,13 @@ set -euo pipefail
 PROJECT_DIR="${PTPOLL_DIR:-/Users/up_main/Desktop/T_Antigravity/PTPoll}"
 cd "$PROJECT_DIR"
 
-PYTHON="${PTPOLL_PYTHON:-python3}"
-echo "[test] running unittest discover on tests/"
+if [[ -n "${PTPOLL_PYTHON:-}" ]]; then
+  PYTHON="$PTPOLL_PYTHON"
+elif [[ -x "$PROJECT_DIR/.venv/bin/python" ]]; then
+  PYTHON="$PROJECT_DIR/.venv/bin/python"
+else
+  PYTHON="python3"
+fi
+
+echo "[test] using $PYTHON"
 "$PYTHON" -m unittest discover -s tests "$@" 2>&1 | tail -10
