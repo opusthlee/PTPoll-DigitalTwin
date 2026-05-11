@@ -77,6 +77,30 @@ class TestDashboardMetaQuery(unittest.TestCase):
         dates = sorted([d for (d,) in self.c.fetchall()])
         self.assertNotIn(None, dates)
 
+    def test_trends_skip_none_dates_before_sort(self):
+        """대시보드 /api/trends도 date 없는 POLL을 정렬 전에 제외해야 함."""
+        self._setup_data()
+        poll_no_date = upsert_object(self.c, "POLL", "p4", "No date trend", {"date": None})
+        region = upsert_object(self.c, "SEGMENT", "REGION:서울", "서울",
+                               {"category": "REGION"})
+        upsert_link(self.c, poll_no_date, region, "MEASURES_IN_SEGMENT",
+                    {"a": 42.0})
+        self.conn.commit()
+
+        self.c.execute('''
+            SELECT p.properties, l.properties FROM links l
+            JOIN objects p ON l.source_id = p.id JOIN objects o ON l.target_id = o.id
+            WHERE l.link_type = 'MEASURES_IN_SEGMENT' AND o.name = ?
+        ''', ("서울",))
+        dates = []
+        for p_props, _ in self.c.fetchall():
+            date = json.loads(p_props).get("date")
+            if not date:
+                continue
+            dates.append(date)
+        dates.sort()
+        self.assertEqual(dates, ["2026-01-15"])
+
 
 class TestRealHubDb(unittest.TestCase):
     """실제 운영 hub.db 정합성 — 통합 환경 검사."""

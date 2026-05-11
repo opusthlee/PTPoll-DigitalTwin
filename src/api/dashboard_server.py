@@ -8,12 +8,13 @@ from urllib.parse import urlparse, parse_qs
 
 PROJECT_META = {"title": "26년 지방선거 분석 엔진", "id": "2026_local_election", "db_file": "hub.db"}
 PORT = 8000
-BASE_DIR = "/Users/up_main/Desktop/T_Antigravity/PTPoll"
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 DB_PATH = os.path.join(BASE_DIR, "data", PROJECT_META["id"], PROJECT_META["db_file"])
 
 import sys
-sys_path = os.path.join(BASE_DIR, "src", "engine")
-if sys_path not in sys.path: sys.path.append(sys_path)
+engine_path = os.path.join(BASE_DIR, "src", "engine")
+if engine_path not in sys.path:
+    sys.path.append(engine_path)
 from simulation_engine import ScenarioSimulator
 
 def normalize_ko(text):
@@ -65,6 +66,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             for p_props, l_props in cursor.fetchall():
                 p, l = json.loads(p_props), json.loads(l_props)
                 date = p.get('date')
+                if not date:
+                    continue
                 if date not in trends["dates"]: trends["dates"].append(date)
                 for cand, rate in l.items():
                     if cand not in trends["candidates"]: trends["candidates"][cand] = []

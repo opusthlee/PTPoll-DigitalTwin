@@ -2,7 +2,8 @@
 # PTPoll venv 셋업 (1회 실행). Homebrew Python의 PEP 668 격리 회피.
 set -euo pipefail
 
-PROJECT_DIR="${PTPOLL_DIR:-/Users/up_main/Desktop/T_Antigravity/PTPoll}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="${PTPOLL_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 cd "$PROJECT_DIR"
 
 if [[ ! -d .venv ]]; then

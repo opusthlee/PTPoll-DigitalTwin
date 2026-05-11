@@ -210,6 +210,17 @@ python3 -m unittest tests.test_dashboard_integration -v  # 상세 출력
 테스트는 임시 sqlite로 격리되며, 통합 테스트는 실제 hub.db도 검사 (없으면 skip).
 네트워크 호출은 mock 처리되어 외부 의존성 없음.
 
+## 운영 점검 기록
+
+### 2026-05-12
+
+- `main`/`origin/main` 최신 커밋 `dd58b2b` 기준으로 D-2 PDF Vision inbox 파이프라인 점검.
+- 로컬 경로가 `/Users/up_main/...`에 고정되어 있던 운영 스크립트와 대시보드 서버를 실행 위치 기준 경로 계산으로 수정.
+- `cron_pipeline.sh` 실제 실행 확인: PollAgg 9028 polls sync, NESDC HTML 10건 처리, PDF inbox 샘플은 이미 처리되어 skip.
+- 대시보드 API 확인: `/api/project`, `/api/trends?segment=서울`, `/api/simulate?segment=서울&impact=1` 응답 정상.
+- `/api/trends`에서 date 없는 POLL이 섞이면 정렬 중 `TypeError`가 나던 문제를 수정하고 회귀 테스트 추가.
+- 검증: `./scripts/run_tests.sh -v`, `.venv/bin/python -m unittest tests.test_dashboard_integration -v`.
+
 ## 트러블슈팅
 
 | 증상 | 원인 | 조치 |

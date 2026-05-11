@@ -12,7 +12,8 @@ set -uo pipefail
 # cron 환경은 PATH가 빈약해서 /opt/homebrew/bin (mac) /usr/local/bin (mac intel) 필요
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
-PROJECT_DIR="${PTPOLL_DIR:-/Users/up_main/Desktop/T_Antigravity/PTPoll}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="${PTPOLL_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 LOG_DIR="$PROJECT_DIR/logs"
 LOG="$LOG_DIR/pipeline.log"
 ALERT="$LOG_DIR/alerts.log"
