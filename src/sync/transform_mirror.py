@@ -26,6 +26,8 @@ import urllib.parse
 import urllib.request
 from typing import Any, Dict, Optional
 
+from src.utils.candidates import normalize_results
+
 DEFAULT_API_BASE = os.environ.get("POLLAGG_API", "https://api-poll.dailyprizm.com/api")
 DEFAULT_DB = os.environ.get("DB_PATH", "data/2026_local_election/hub.db")
 SOURCE_NAME = "pollagg_rest"
@@ -129,8 +131,8 @@ def run_sync(api_base: str, db_path: str, category: Optional[str] = None,
     for p in polls:
         poll_id = str(p["id"])
         agency = (p.get("agency") or "Unknown").strip()
-        results = p.get("results") or {}
-        if not isinstance(results, dict) or not results:
+        results = normalize_results(p.get("results") or {})
+        if not results:
             continue  # 결과 없는 폴은 graph에 의미 없음
         region = (p.get("region") or "전국").strip() or "전국"
         district = p.get("district")
@@ -160,11 +162,7 @@ def run_sync(api_base: str, db_path: str, category: Optional[str] = None,
         upsert_link(c, pollster_id, poll_obj_id, "CONDUCTED", {})
 
         # 후보별 MEASURES + 후보 객체
-        for cand_name, support_rate in results.items():
-            try:
-                rate = float(support_rate)
-            except (TypeError, ValueError):
-                continue
+        for cand_name, rate in results.items():
             cand_id = upsert_object(c, "CANDIDATE", cand_name, cand_name, {})
             upsert_link(c, poll_obj_id, cand_id, "MEASURES", {"support_rate": rate})
             measures += 1
@@ -176,9 +174,7 @@ def run_sync(api_base: str, db_path: str, category: Optional[str] = None,
         seg_external_id = f"REGION:{region}"
         seg_id = upsert_object(c, "SEGMENT", seg_external_id, region,
                                {"category": "REGION", "source_field": "polls.region"})
-        seg_results = {k: float(v) for k, v in results.items()
-                       if isinstance(v, (int, float))}
-        upsert_link(c, poll_obj_id, seg_id, "MEASURES_IN_SEGMENT", seg_results)
+        upsert_link(c, poll_obj_id, seg_id, "MEASURES_IN_SEGMENT", results)
         seg_measures += 1
         regions.add(region)
 

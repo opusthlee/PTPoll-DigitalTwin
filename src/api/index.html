@@ -11,6 +11,8 @@
         body { font-family: 'Outfit', sans-serif; background-color: #0b0f1a; color: #e2e8f0; height: 100vh; overflow: hidden; }
         .glass-card { background: rgba(22, 28, 45, 0.7); backdrop-filter: blur(25px); border: 1px solid rgba(255,255,255,0.05); border-radius: 1.5rem; }
         .sidebar-title { background: linear-gradient(135deg, #3b82f6 0%, #2dd4bf 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .chart-toggle { border: 1px solid rgba(148, 163, 184, 0.2); color: #94a3b8; background: rgba(15, 23, 42, 0.65); }
+        .chart-toggle.active { border-color: rgba(59, 130, 246, 0.8); color: #dbeafe; background: rgba(37, 99, 235, 0.22); }
     </style>
 </head>
 <body class="p-6">
@@ -60,7 +62,17 @@
                     <div class="flex-grow relative"><canvas id="supportChart"></canvas></div>
                 </div>
                 <div class="glass-card p-6 flex flex-col">
-                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4"><span id="trendTargetName" class="text-blue-400">전국</span> Trend Trajectory</h3>
+                    <div class="flex items-start justify-between gap-4 mb-3">
+                        <div>
+                            <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest"><span id="trendTargetName" class="text-blue-400">전국</span> Trend Trajectory</h3>
+                            <p id="trendSummary" class="text-[10px] text-slate-500 mt-1">주요 정당 중심</p>
+                        </div>
+                        <div class="flex shrink-0 overflow-hidden rounded-lg">
+                            <button id="mainTrendBtn" onclick="setTrendView('main')" class="chart-toggle active px-3 py-1.5 text-[10px] font-bold uppercase">주요</button>
+                            <button id="minorTrendBtn" onclick="setTrendView('minor')" class="chart-toggle px-3 py-1.5 text-[10px] font-bold uppercase">소수·기타</button>
+                            <button id="allTrendBtn" onclick="setTrendView('all')" class="chart-toggle px-3 py-1.5 text-[10px] font-bold uppercase">전체</button>
+                        </div>
+                    </div>
                     <div class="flex-grow relative"><canvas id="trendChart"></canvas></div>
                 </div>
             </div>
@@ -73,6 +85,13 @@
 
     <script>
         let barChart, trendChart, lastActiveType = 'region';
+        let trendView = 'main';
+        let lastTrendData = null;
+        let lastSimulationData = null;
+        const MINOR_THRESHOLD = 3;
+        const RECENT_POINTS = 24;
+        const SERIES_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#a855f7', '#14b8a6', '#f97316', '#e879f9'];
+        const RESIDUAL_LABELS = ['기타', '기타정당', '지지정당 없음', '모름/ 무응답', '모름/무응답', 'positive', 'negative'];
 
         function log(msg, isError = false) {
             const el = document.getElementById('logContent');
@@ -87,14 +106,207 @@
             const projResp = await fetch('/api/project');
             const project = await projResp.json();
             document.getElementById('projectTitle').innerText = project.title;
+            const metaResp = await fetch('/api/meta');
+            const meta = await metaResp.json();
+            populateSelect('regSelect', meta.REGION, '전국', { '전국': '전국 (Baseline)', '서울': '서울 (Metro)' });
+            populateSelect('ageSelect', meta.AGE, null);
+            populateSelect('genSelect', meta.GENDER, null);
             initCharts();
             await runSimulation('region');
         }
 
+        function populateSelect(id, values = [], preferred, labelMap = {}) {
+            const select = document.getElementById(id);
+            const clean = [...new Set(values)].filter(Boolean);
+            select.innerHTML = '';
+            if (!clean.length) {
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = '분석 가능 데이터 없음';
+                option.disabled = true;
+                option.selected = true;
+                select.appendChild(option);
+                return;
+            }
+            clean.forEach(value => {
+                const option = document.createElement('option');
+                option.value = value;
+                option.textContent = labelMap[value] || value;
+                select.appendChild(option);
+            });
+            if (preferred && clean.includes(preferred)) select.value = preferred;
+        }
+
+        const stackedValueLabels = {
+            id: 'stackedValueLabels',
+            afterDatasetsDraw(chart) {
+                const { ctx, chartArea } = chart;
+                const threshold = chart.options.plugins.stackedValueLabels?.threshold ?? 4;
+                ctx.save();
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.font = '700 10px Outfit, sans-serif';
+
+                chart.data.datasets.forEach((dataset, datasetIndex) => {
+                    const meta = chart.getDatasetMeta(datasetIndex);
+                    if (meta.hidden) return;
+                    meta.data.forEach((bar, index) => {
+                        const value = toNumber(dataset.data[index]);
+                        if (!Number.isFinite(value) || value < threshold) return;
+
+                        const props = bar.getProps(['x', 'y', 'base', 'width'], true);
+                        const height = Math.abs(props.base - props.y);
+                        if (height < 16 || props.y < chartArea.top || props.base > chartArea.bottom + 1) return;
+
+                        ctx.fillStyle = value >= 12 ? '#f8fafc' : '#dbeafe';
+                        ctx.fillText(value.toFixed(value >= 10 ? 0 : 1), props.x, props.y + height / 2);
+                    });
+                });
+                ctx.restore();
+            }
+        };
+
         function initCharts() {
-            const opt = { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#64748b', font: { size: 10 } } } } };
-            barChart = new Chart(document.getElementById('supportChart'), { type: 'bar', data: { labels: [], datasets: [] }, options: opt });
-            trendChart = new Chart(document.getElementById('trendChart'), { type: 'line', data: { labels: [], datasets: [] }, options: opt });
+            const opt = {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 24, usePointStyle: true }
+                    },
+                    tooltip: {
+                        filter: (item) => item.raw !== null && item.raw !== undefined,
+                        callbacks: {
+                            label: (ctx) => {
+                                const y = ctx.parsed.y;
+                                return `${ctx.dataset.label}: ${Number.isFinite(y) ? y.toFixed(1) : '-'}%`;
+                            }
+                        }
+                    },
+                    stackedValueLabels: { threshold: 4 }
+                },
+                scales: {
+                    x: { stacked: true, ticks: { color: '#64748b', maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }, grid: { color: 'rgba(148, 163, 184, 0.06)' } },
+                    y: { stacked: true, beginAtZero: true, suggestedMax: 100, ticks: { color: '#64748b', callback: (v) => `${v}%` }, grid: { color: 'rgba(148, 163, 184, 0.08)' } }
+                },
+                elements: { point: { radius: 0, hoverRadius: 4 }, line: { borderWidth: 3 } }
+            };
+            const projectionOpt = {
+                ...opt,
+                plugins: {
+                    ...opt.plugins,
+                    stackedValueLabels: { threshold: 2 }
+                }
+            };
+            barChart = new Chart(document.getElementById('supportChart'), { type: 'bar', data: { labels: [], datasets: [] }, options: projectionOpt, plugins: [stackedValueLabels] });
+            trendChart = new Chart(document.getElementById('trendChart'), { type: 'bar', data: { labels: [], datasets: [] }, options: opt, plugins: [stackedValueLabels] });
+        }
+
+        function setTrendView(view) {
+            trendView = view;
+            ['main', 'minor', 'all'].forEach(v => {
+                document.getElementById(`${v}TrendBtn`).classList.toggle('active', v === view);
+            });
+            renderTrendChart();
+        }
+
+        function seriesStats(values) {
+            const valid = values.map(toNumber).filter(v => Number.isFinite(v));
+            const max = valid.length ? Math.max(...valid) : 0;
+            const latestValue = values.length ? toNumber(values[values.length - 1]) : null;
+            const latest = Number.isFinite(latestValue) ? latestValue : -1;
+            return { max, latest, points: valid.length };
+        }
+
+        function toNumber(value) {
+            const n = Number(value);
+            return Number.isFinite(n) ? n : null;
+        }
+
+        function isResidualSeries(name) {
+            return RESIDUAL_LABELS.some(label => name.includes(label));
+        }
+
+        function classifySeries(name, values) {
+            const stats = seriesStats(values);
+            if (isResidualSeries(name)) return 'minor';
+            return stats.max < MINOR_THRESHOLD ? 'minor' : 'main';
+        }
+
+        function compressLabels(labels) {
+            const maxLabels = 12;
+            if (labels.length <= maxLabels) return labels;
+            const step = Math.ceil(labels.length / maxLabels);
+            return labels.map((label, idx) => (idx % step === 0 || idx === labels.length - 1) ? label : '');
+        }
+
+        function getVisibleSeries() {
+            if (!lastTrendData || !lastSimulationData) return;
+
+            const names = Object.keys(lastTrendData.candidates || {});
+            const decorated = names.map(name => {
+                const values = lastTrendData.candidates[name].map(toNumber);
+                return { name, values, type: classifySeries(name, values), stats: seriesStats(values) };
+            }).sort((a, b) => b.stats.latest - a.stats.latest || b.stats.max - a.stats.max);
+
+            const visible = decorated.filter(item => trendView === 'all' || item.type === trendView);
+            return { decorated, visible };
+        }
+
+        function renderProjectionChart() {
+            const series = getVisibleSeries();
+            if (!series) return;
+            const original = lastSimulationData.original || {};
+            const projected = lastSimulationData.simulated || {};
+
+            barChart.data.labels = ['Current', 'Projected'];
+            const currentSeries = series.visible.filter(item =>
+                Number.isFinite(toNumber(original[item.name])) ||
+                Number.isFinite(toNumber(projected[item.name]))
+            );
+            barChart.data.datasets = currentSeries.map((item, idx) => ({
+                label: item.name,
+                data: [toNumber(original[item.name]), toNumber(projected[item.name])],
+                backgroundColor: item.type === 'minor' ? 'rgba(100, 116, 139, 0.65)' : SERIES_COLORS[idx % SERIES_COLORS.length],
+                borderColor: 'rgba(15, 23, 42, 0.4)',
+                borderWidth: 1,
+                borderRadius: 3
+            }));
+            barChart.update();
+        }
+
+        function renderTrendChart() {
+            const series = getVisibleSeries();
+            if (!series) return;
+
+            const allDates = lastTrendData.dates || [];
+            const start = Math.max(0, allDates.length - RECENT_POINTS);
+            const labels = compressLabels(allDates.slice(start).map(d => d.slice(2))).concat('Future');
+            const projected = lastSimulationData.simulated || {};
+            const visibleRecent = series.visible.filter(item =>
+                item.values.slice(start).some(value => Number.isFinite(toNumber(value))) ||
+                Number.isFinite(toNumber(projected[item.name]))
+            );
+
+            trendChart.data.labels = labels;
+            trendChart.data.datasets = visibleRecent.map((item, idx) => ({
+                label: item.name,
+                data: item.values.slice(start).concat(toNumber(projected[item.name])),
+                backgroundColor: item.type === 'minor' ? 'rgba(100, 116, 139, 0.65)' : SERIES_COLORS[idx % SERIES_COLORS.length],
+                borderColor: 'rgba(15, 23, 42, 0.45)',
+                borderWidth: 1,
+                borderRadius: 2
+            }));
+            trendChart.update();
+
+            renderProjectionChart();
+
+            const mainCount = series.decorated.filter(item => item.type === 'main').length;
+            const minorCount = series.decorated.length - mainCount;
+            const modeText = trendView === 'main' ? '주요 정당 중심' : trendView === 'minor' ? '소수·기타 항목' : '전체 항목';
+            document.getElementById('trendSummary').innerText = `${modeText} · 최근 ${Math.min(RECENT_POINTS, allDates.length)}개 날짜 · 표시 ${visibleRecent.length}개 · 숨김 ${trendView === 'main' ? minorCount : trendView === 'minor' ? mainCount : 0}개`;
         }
 
         async function runSimulation(triggerType) {
@@ -107,8 +319,8 @@
             // 지능형 세그먼트 결정: 마지막으로 변경된 카테고리를 우선 분석
             let segment = "전국";
             if (lastActiveType === 'region') segment = reg;
-            else if (lastActiveType === 'age') segment = age;
-            else if (lastActiveType === 'gender') segment = gen;
+            else if (lastActiveType === 'age' && age) segment = age;
+            else if (lastActiveType === 'gender' && gen) segment = gen;
 
             document.getElementById('trendTargetName').innerText = segment;
             const impact = document.getElementById('impactSlider').value / 100;
@@ -124,26 +336,13 @@
                 const sResp = await fetch(`/api/simulate?segment=${safeSegment}&impact=${impact}`);
                 const sData = await sResp.json();
                 if (sData.error) throw new Error(sData.error);
+                lastTrendData = tData;
+                lastSimulationData = sData;
 
                 // UI 갱신 (데이터 존재 여부 확인)
                 if (!sData.original || !sData.simulated) throw new Error("Incomplete data received");
 
-                barChart.data.labels = Object.keys(sData.original);
-                barChart.data.datasets = [
-                    { label: 'Current', data: Object.values(sData.original), backgroundColor: 'rgba(71, 85, 105, 0.3)', borderRadius: 8 },
-                    { label: 'Projected', data: Object.values(sData.simulated), backgroundColor: '#3b82f6', borderRadius: 8 }
-                ];
-                barChart.update();
-
-                trendChart.data.labels = [...tData.dates, "Future"];
-                trendChart.data.datasets = Object.keys(tData.candidates).map((name, idx) => ({
-                    label: name,
-                    data: [...tData.candidates[name], sData.simulated[name]],
-                    borderColor: ['#3b82f6', '#ef4444', '#10b981'][idx % 3],
-                    tension: 0.4,
-                    segment: { borderDash: (ctx) => ctx.p1DataIndex === tData.dates.length ? [5, 5] : [] }
-                }));
-                trendChart.update();
+                renderTrendChart();
 
                 const mList = document.getElementById('momentumList');
                 mList.innerHTML = "";

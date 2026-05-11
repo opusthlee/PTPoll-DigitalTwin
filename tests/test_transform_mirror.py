@@ -9,6 +9,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.db.init_twin_db import init_db
+from src.engine.simulation_engine import ScenarioSimulator
 from src.sync.transform_mirror import (
     run_sync,
     update_sync_state,
@@ -16,6 +17,25 @@ from src.sync.transform_mirror import (
     upsert_object,
     upsert_raw_mirror,
 )
+from src.utils.candidates import normalize_candidate_name, normalize_results
+from src.utils.history import load_segment_history
+
+
+class TestCandidateNormalization(unittest.TestCase):
+    def test_aliases_to_korean_party_names(self):
+        self.assertEqual(normalize_candidate_name("DP_lead"), "더불어민주당")
+        self.assertEqual(normalize_candidate_name("PPP"), "국민의힘")
+        self.assertEqual(normalize_candidate_name("Others"), "기타정당")
+        self.assertEqual(normalize_candidate_name("기타"), "기타정당")
+
+    def test_duplicate_aliases_keep_largest_value(self):
+        results = normalize_results({
+            "DP": 41.0,
+            "DP_lead": 42.0,
+            "PPP": "35.5",
+            "bad": "n/a",
+        })
+        self.assertEqual(results, {"더불어민주당": 42.0, "국민의힘": 35.5})
 
 
 class TestUpsertObject(unittest.TestCase):
@@ -166,6 +186,52 @@ class TestRunSyncWithMockedAPI(unittest.TestCase):
         }]
         stats = run_sync("http://test/api", self.db)
         self.assertEqual(stats["measures"], 2, "유효 숫자만 measures 생성되어야")
+
+    @mock.patch("src.sync.transform_mirror.fetch_polls")
+    def test_sync_normalizes_candidate_aliases(self, m):
+        m.return_value = [{
+            "id": 1, "agency": "X", "date": "2026-01-01",
+            "region": "전국",
+            "results": {"DP_lead": 42.0, "PPP": 35.0, "Others": 3.0},
+        }]
+        run_sync("http://test/api", self.db)
+        conn = sqlite3.connect(self.db)
+        c = conn.cursor()
+        c.execute("SELECT external_id FROM objects WHERE obj_type='CANDIDATE' ORDER BY external_id")
+        self.assertEqual([r[0] for r in c.fetchall()], ["국민의힘", "기타정당", "더불어민주당"])
+        c.execute("SELECT properties FROM links WHERE link_type='MEASURES_IN_SEGMENT'")
+        props = json.loads(c.fetchone()[0])
+        self.assertEqual(props, {"더불어민주당": 42.0, "국민의힘": 35.0, "기타정당": 3.0})
+        conn.close()
+
+    @mock.patch("src.sync.transform_mirror.fetch_polls")
+    def test_history_averages_same_date_and_matches_simulation_original(self, m):
+        m.return_value = [
+            {
+                "id": 1, "agency": "A", "date": "2026-01-01",
+                "region": "전국", "category": "election",
+                "results": {"DP": 40.0, "PPP": 30.0},
+            },
+            {
+                "id": 2, "agency": "B", "date": "2026-01-01",
+                "region": "전국", "category": "election",
+                "results": {"더불어민주당": 44.0, "국민의힘": 34.0},
+            },
+            {
+                "id": 3, "agency": "C", "date": "2026-01-02",
+                "region": "전국", "category": "approval_rating",
+                "results": {"positive": 60.0, "negative": 30.0},
+            },
+        ]
+        run_sync("http://test/api", self.db)
+        dates, candidates = load_segment_history(self.db, "전국")
+        self.assertEqual(dates, ["2026-01-01"])
+        self.assertEqual(candidates["더불어민주당"], [42.0])
+        self.assertEqual(candidates["국민의힘"], [32.0])
+
+        sim = ScenarioSimulator(self.db).run_simulation("전국", 0)
+        self.assertEqual(sim["original"]["더불어민주당"], 42.0)
+        self.assertEqual(sim["original"]["국민의힘"], 32.0)
 
     @mock.patch("src.sync.transform_mirror.fetch_polls")
     def test_sync_state_recorded(self, m):

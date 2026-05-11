@@ -221,6 +221,16 @@ python3 -m unittest tests.test_dashboard_integration -v  # 상세 출력
 - `/api/trends`에서 date 없는 POLL이 섞이면 정렬 중 `TypeError`가 나던 문제를 수정하고 회귀 테스트 추가.
 - 검증: `./scripts/run_tests.sh -v`, `.venv/bin/python -m unittest tests.test_dashboard_integration -v`.
 
+### 2026-05-12 대시보드 가독성·수치 정합성 보강
+
+- Trend/Projection 그래프를 누적 막대 기반으로 정리하고 기본 화면은 최근 24개 날짜만 표시.
+- 기본 그래프는 주요 정당 중심으로 표시하고, 소수·기타/전체 항목은 토글로 확인하도록 변경.
+- 막대 내부 수치 라벨을 추가하되 `%` 기호는 생략하고 작은 조각은 숨겨 겹침을 방지.
+- `DP`, `DP_lead`, `PPP`, `PPP_lead`, `Others`, `기타` 같은 PollAgg alias를 표준 정당명으로 정규화.
+- 같은 날짜의 여러 poll은 후보별 평균으로 집계하고, `approval_rating`의 positive/negative는 선거 지지율 계산에서 제외.
+- Simulation `original`은 최신 날짜에 실제 값이 있는 항목만 사용하도록 수정해 Trend 최신값과 Projection 현재값을 일치시킴.
+- 검증: `./scripts/run_tests.sh -v`, localhost `/api/trends`, `/api/simulate` 응답 대조.
+
 ## 트러블슈팅
 
 | 증상 | 원인 | 조치 |

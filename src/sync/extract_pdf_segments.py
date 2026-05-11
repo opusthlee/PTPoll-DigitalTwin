@@ -27,6 +27,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 sys.path.insert(0, PROJECT_ROOT)
 
 from src.collectors.nesdc_deep_pdf import AnthropicVisionExtractor  # noqa: E402
+from src.utils.candidates import normalize_results  # noqa: E402
 
 logger = logging.getLogger("extract_pdf_segments")
 
@@ -168,7 +169,8 @@ def store_extraction(db_path: str, pdf_path: str, file_hash: str,
     # 후보별 MEASURES (top-line: 모든 segment의 후보 합집합)
     all_candidates = set()
     for s in segments:
-        all_candidates.update(s.get("results", {}).keys())
+        s["results"] = normalize_results(s.get("results", {}))
+        all_candidates.update(s["results"].keys())
 
     measures_count = 0
     for cand in all_candidates:
@@ -184,7 +186,9 @@ def store_extraction(db_path: str, pdf_path: str, file_hash: str,
     for seg in segments:
         group = seg["group"]
         seg_name = seg["segment"]
-        results = seg["results"]
+        results = normalize_results(seg["results"])
+        if not results:
+            continue
         seg_external = f"{GROUP_CATEGORY[group]}:{seg_name}"
         seg_id = upsert_object(c, "SEGMENT", seg_external, seg_name,
                                {"category": GROUP_CATEGORY[group],
